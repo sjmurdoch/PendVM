@@ -1,2 +1,20 @@
 *.o
 pendvm
+
+# LaTeX artifacts from pendvm.tex
+pendvm.dvi
+pendvm.aux
+pendvm.log
+pendvm.ps
+
+# Test binaries and macOS debug-symbol bundles
+tests/check_reversible
+tests/test_arith
+tests/test_branch
+tests/test_helpers
+tests/test_involutive
+tests/test_logic
+tests/test_parse
+tests/test_rotate
+tests/test_shift
+tests/*.dSYM/
