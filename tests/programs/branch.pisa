@@ -1,0 +1,19 @@
+;; pendulum pal file
+;; Branch round-trip using PAIRED branches.
+;;
+;; In the Pendulum ISA, BR is cumulative across cycles: a branch adds its
+;; offset to BR, and adjust_pc uses BR to advance PC. BR does not auto-clear.
+;; The "paired branch" pattern is the idiom: a forward branch at A to B is
+;; matched by a branch at B back to A, whose negative offset exactly cancels
+;; BR, so subsequent instructions step normally.
+;;
+;; Here we `bra` over one instruction and pair it with a matching `bra` back
+;; at the landing site. In forward execution the intermediate ADDI is
+;; skipped; in reverse execution the whole thing unwinds.
+start                ; PC=0
+        addi $1 11   ; PC=1
+        bra 4        ; PC=2: skip PC=3, BR += (4-2)=2, PC -> 4
+        addi $2 99   ; PC=3: skipped
+        bra 2        ; PC=4: BR += (2-4)=-2 -> BR=0, fall through
+        addi $3 22   ; PC=5: executed
+finish               ; PC=6

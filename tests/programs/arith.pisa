@@ -1,0 +1,13 @@
+;; pendulum pal file
+;; Arithmetic round-trip: ADDI/ADD/SUB/NEG all have dir-multiplied inverse
+;; semantics, so the reverse run unwinds each one exactly.
+start
+        addi $1 100
+        addi $2 42
+        add  $1 $2        ; $1 = 142
+        sub  $1 $2        ; $1 = 100
+        neg  $1           ; $1 = -100
+        neg  $1           ; $1 = 100 (involutive)
+        addi $1 -100      ; $1 = 0
+        addi $2 -42       ; $2 = 0
+finish

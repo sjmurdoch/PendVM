@@ -1,0 +1,4 @@
+;; pendulum pal file
+;; Trivial reversible program: start then finish. No work, no state.
+start
+finish

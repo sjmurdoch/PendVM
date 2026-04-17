@@ -1,0 +1,10 @@
+;; pendulum pal file
+;; DELIBERATELY IRREVERSIBLE: EMIT prints its operand and then zeros the
+;; register. There is no inverse information, so running in reverse cannot
+;; restore the value the forward pass destroyed. check_reversible should
+;; detect this: run_integration.sh treats a non-zero exit from programs
+;; whose name starts with "break" as expected.
+start
+        addi $1 1234
+        emit $1          ; prints 1234, then $1 := 0. Irreversible.
+finish

@@ -1,0 +1,17 @@
+;; pendulum pal file
+;; Logical round-trip: ANDX/ORX/XORX/NORX all XOR their result into rd.
+;; Since XOR writeback is self-inverse, running each once forward and
+;; then once reversed restores rd. (The handlers don't look at m->dir,
+;; so semantically forward and reverse execute the same code, and the
+;; round-trip relies on the instruction appearing once in each direction.)
+start
+        addi $1 0x0F0F
+        addi $2 0x00FF
+        andx $3 $1 $2     ; $3 ^= ($1 & $2)
+        orx  $4 $1 $2     ; $4 ^= ($1 | $2)
+        xor  $5 $1        ; $5 ^= $1
+        norx $6 $1 $2     ; $6 ^= ~($1 | $2)
+        xori $1 0x0F0F    ; undo the set of $1
+        xori $2 0x00FF    ; undo the set of $2
+        addi $1 0         ; zero-op so finish isn't adjacent to xori
+finish

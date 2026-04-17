@@ -1,0 +1,10 @@
+;; pendulum pal file
+;; Rotate round-trip: RL and RR are dir-gated (forward rotates one way,
+;; reverse the other), so a single forward run + its reverse restores rsd.
+start
+        addi $1 0x1234
+        addi $2 0x5678
+        rl   $1 5         ; $1 rotated left by 5
+        rr   $2 3         ; $2 rotated right by 3
+        addi $1 0         ; spacer
+finish
