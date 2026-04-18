@@ -4,21 +4,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-PendVM is a virtual machine that executes programs written in the PISA / PAL assembly language — the instruction set of the **Pendulum**, a reversible processor designed in the mid-1990s at the MIT AI lab (Matt Debergalis and Mike P. Frank). The code is near-ANSI C (C89) and is preserved/rehosted rather than actively developed.
+PendVM is a virtual machine that executes programs written in the PISA / PAL assembly language — the instruction set of the **Pendulum**, a reversible processor designed in the mid-1990s at the MIT AI lab by Carlin Vieri and Michael P. Frank; the simulator/assembler (PendVM) was built by Matt Debergalis. The code is near-ANSI C (C89) and is preserved/rehosted rather than actively developed.
 
 The defining feature of the target ISA is **reversibility**: every instruction must be undoable. The VM models this by carrying a direction flag (`FORWARD` / `REVERSE`) on the machine and by implementing destructive-update semantics (XOR-based writes, `EXCH` for memory, `SWAPBR` for control flow) rather than normal MIPS-style overwrites.
+
+### Which PISA?
+
+"PISA" is ambiguous. Three references describe three different instruction sets:
+
+- **Vieri 1999 (Appendix A of *Reversible Computer Engineering and Architecture*)** — the *hardware* PISA: 12-bit words, 8 GPRs, branches that exchange `PC` with a register. Targets the FLATTOP silicon.
+- **Frank 1999 (Appendix B of *Reversibility for Efficient Computing*)** — the *simulator* PISA: 32-bit words, 32 GPRs, branches that accumulate into a `BR` register. Frank's Appendix B is explicitly captioned as "the 32-bit simulator/compiler version of the PISA instruction set that was used in the Pendulum simulator and the R language compiler" — **this is the dialect PendVM implements.**
+- **Haulund 2016 (§2.4 of *Design and Implementation of a Reversible Object-Oriented Programming Language*)** — a re-documentation of Frank's simulator PISA, adding one instruction (`DATA c` for static storage) used by the ROOPL compiler. Haulund's grammar and PendVM's `instructions[]` table agree almost exactly.
+
+The bundled `fib.pisa` is written in **Vieri's hardware PISA**, not Frank's simulator PISA — it uses `bez $ra $rb`, `rbez`, `rbltz`, and two-register `bltz`, none of which exist in PendVM's `instructions[]` table. It has never run on this VM in its shipped form.
+
+See `docs/PISA_COMPLIANCE_PLAN.md` for the detailed conformance status and a triage plan.
 
 ## Build and run
 
 ```sh
 make                     # builds the `pendvm` binary (gcc, -std=c89)
 make clean               # removes objects and binary
-./pendvm fib.pisa        # run a PAL program (fib.pisa is the bundled example)
+./pendvm <file.pisa>     # run a PAL program
 ./pendvm --debug <file>  # interactive debugger REPL
 ./pendvm --radix 16 <f>  # set output radix for show/emit (10 or 16)
 ```
 
-There is **no test suite** and no lint configuration. Verification is manual: build, then run `./pendvm fib.pisa` (computes the 18th Fibonacci number) and confirm it halts normally.
+There is **no test suite** and no lint configuration. The bundled `fib.pisa` does *not* execute cleanly — it is written in Vieri's hardware PISA dialect (see "Which PISA?" above) and uses instructions PendVM does not implement. For a smoke test, write or use a program that sticks to the mnemonics in `pal_parse.c`'s `instructions[]` table.
 
 `DEBUG=-DDEBUG` in the Makefile enables `IF_DEBUG(...)` tracing; remove it for a quieter build. `-Wno-pointer-sign` is intentional — the code relies on signed/unsigned char pointer interchange.
 
