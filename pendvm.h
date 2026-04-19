@@ -101,7 +101,7 @@ void loop(void);
 void pendsim_error(char *);
 void display_state(void);
 int step_processor(int);
-int adjust_pc(void);
+void adjust_pc(void);
 int execute_instruction(void);
 
 /* instruction handlers (in machine.c) */
@@ -142,6 +142,7 @@ int i_show(WORD, WORD, WORD);
 int i_emit(WORD, WORD, WORD);
 int i_start(WORD, WORD, WORD);
 int i_finish(WORD, WORD, WORD);
+int i_data(WORD, WORD, WORD);
 
 /* pendsim command functions */
 int com_break(char args[][64], int);

@@ -99,6 +99,34 @@ static void test_add_in_reverse_dir(void)
     TEST_ASSERT_EQUAL_INT(42, m->reg[1]);
 }
 
+/* Frank's inversion rule (Appendix B.3): ADD and SUB are paired inverses
+   — performing ADD then SUB with the same operands is the identity in
+   the forward direction. This is the compile-time pairing rule the
+   compiler will rely on. */
+static void test_add_then_sub_is_identity(void)
+{
+    int before[MAX_REG], after[MAX_REG];
+    m->reg[1] = 0x1234;
+    m->reg[2] = 0x7F;
+    test_snapshot_regs(before);
+    i_add(1, 2, 0);
+    i_sub(1, 2, 0);
+    test_snapshot_regs(after);
+    test_assert_regs_eq(before, after);
+}
+
+/* ADDI is self-inverting when negated (Frank B.3: ADDI r c ↔ ADDI r -c). */
+static void test_addi_plus_negated_is_identity(void)
+{
+    int before[MAX_REG], after[MAX_REG];
+    m->reg[3] = 0xABCD;
+    test_snapshot_regs(before);
+    i_addi(3,  1234, 0);
+    i_addi(3, -1234, 0);
+    test_snapshot_regs(after);
+    test_assert_regs_eq(before, after);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -109,5 +137,7 @@ int main(void)
     RUN_TEST(test_addi_reverse_undoes);
     RUN_TEST(test_sub_reverse_undoes);
     RUN_TEST(test_add_in_reverse_dir);
+    RUN_TEST(test_add_then_sub_is_identity);
+    RUN_TEST(test_addi_plus_negated_is_identity);
     return UNITY_END();
 }

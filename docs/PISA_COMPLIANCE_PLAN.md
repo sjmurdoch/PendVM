@@ -47,11 +47,14 @@ between PendVM and Vieri are in fact correct implementations of Frank.
 1. Recognise Frank 1999 Appendix B as the specification PendVM implements.
 2. Fix the defects that are unambiguous coding bugs under any reading.
 3. Add the features Frank's Appendix B *does* require but PendVM lacks.
-4. Decide whether to additionally support Vieri's hardware PISA (the dialect
-   the bundled `fib.pisa` is written in) and/or Haulund's `DATA` extension.
+4. **Adopt Haulund 2016 (Frank Appendix B + `DATA c`) as the target dialect**,
+   to serve as the code-generation target for a Janus-extension compiler
+   with dynamic memory allocation and state machines (§1.3). Vieri's
+   hardware PISA is kept as reference only; see §5.1 for the decision
+   record and the alternatives considered.
 5. Build a test suite driven by Frank's Appendix B operation expressions,
-   Frank §8.3's multiplication example, and (conditionally on the dialect
-   choice) Vieri's Chapter 9 Fibonacci trace.
+   Frank §8.3's multiplication example, and a Haulund-style static-data
+   round-trip once `DATA` lands.
 
 Each task below is ordered so it can be landed as a small, test-covered
 increment (as per `CLAUDE.md` "small incremental changes").
@@ -107,6 +110,38 @@ pp.130–131. It has never run on this VM (the uses of `bez`, `rbez`, and
 two-register `bltz` are all Vieri-hardware syntax). Restoring a
 working bundled self-test is a goal of this plan; the shape of the fix
 depends on the dialect policy (§5).
+
+### 1.3 Motivating use case: compiling a Janus extension to PendVM
+
+The downstream goal driving this plan is a compiler for a Janus extension
+with **dynamic memory allocation** and **state machines**, targeting
+PendVM as the execution substrate. That shapes the dialect decision:
+
+- **Register / word width.** A compiler target needs room for heap
+  pointers, free-list metadata, and a register-allocated state variable.
+  Vieri's 12-bit / 8-GPR hardware dialect is not viable; Frank's
+  32-bit / 32-GPR simulator dialect is the floor.
+- **Reversible dynamic allocation.** In a reversible setting, `malloc` /
+  `free` must be paired inverses — typically implemented as `EXCH` swaps
+  against a free-list header (you cannot *create* a pointer, only move
+  one out of a pool). PendVM already implements `EXCH` and `SWAPBR`
+  matching Frank B.5, so no ISA-level change is required for allocation
+  itself; the work lives in the compiler's runtime.
+- **State machines.** A natural codegen is a static transition table
+  plus an indexed `EXCH`/load. Emitting that table in pure Frank PISA
+  requires a program-entry init sequence that is itself reversible —
+  awkward and bulky per state machine. Haulund's `DATA c` directive
+  (Figure 2.7, §4.2) lets the assembler drop the table directly into
+  memory as a labelled run of cells, with no init code to invert. This
+  is the load-bearing reason for picking Haulund over pure Frank.
+- **Precedent.** Haulund's ROOPL compiler already emits PAL for PendVM
+  (same `;; pendulum pal file` header, same instruction grammar plus
+  `DATA`) and handles heap objects and vtables via labelled `DATA`
+  runs. It is the closest existing reference for a higher-level
+  reversible language compiled to this VM.
+
+The dialect decision in §5.1 is driven by this use case, not by
+archival fidelity.
 
 ---
 
@@ -231,16 +266,21 @@ current program hits it, but trivially fixable.
 
 ## 4. Missing features
 
-### 4.1 `DATA c` static-storage directive (Haulund-required, Frank-absent)
+### 4.1 `DATA c` static-storage directive (priority — required by the compiler target)
 
 Add an `i_data(WORD imm, WORD, WORD)` handler that stores `imm` into the
 current cell's `value` field and marks the cell `MEM_DATA` rather than
 `MEM_INST`. Register it in `instructions[]` with shape `{IMM, NIL, NIL}`.
-Without this, ROOPL programs cannot load (Haulund §4.2; Figure 4.3 shows
-classes emitting runs of labelled `DATA` cells for vtables).
 
-This is independent of the Vieri-vs-Frank dialect choice; add it
-unconditionally.
+This is the single load-bearing ISA-level addition for the Janus-extension
+compiler (§1.3): state-machine transition tables, free-list headers, and
+any compiler-emitted static tables all land as labelled runs of `DATA`
+cells. Without it, no ROOPL program loads either (Haulund §4.2; Figure 4.3
+shows classes emitting runs of labelled `DATA` cells for vtables), so
+landing `DATA` also unlocks the Haulund integration test (§6.4) as a
+validation corpus for compiler-style code.
+
+Priority: land immediately after the §3 coding bugs are fixed.
 
 ### 4.2 `READ reg` input instruction (Frank B.5 optional)
 
@@ -248,48 +288,78 @@ Frank includes `READ` for symmetry with `SHOW`. PendVM has no input
 stream today. Defer unless a user actually needs it — flagging it rather
 than implementing on spec.
 
-### 4.3 `BEZ`/`RBEZ`/`RBLTZ` Vieri-hardware branches (optional, §5.1)
+### 4.3 `BEZ`/`RBEZ`/`RBLTZ` Vieri-hardware branches (out of scope)
 
-Only add if the user chooses dialect (A) or (C). See §5.1 and §5.2.
+Not needed under the chosen Haulund target (§5.1). Kept in §5.2 as a
+reference implementation sketch in case the archival-fidelity path
+(rehabilitating Vieri's Ch.9 Fibonacci trace under a dialect flag) is
+ever revisited.
 
 ---
 
 ## 5. Policy decisions
 
-### 5.1 Dialect target — **open, flag for user**
+### 5.1 Dialect target — **decided: Haulund 2016 (Frank Appendix B + `DATA`)**
 
-This is the single largest question.
+**Decision.** Target **Haulund 2016**, i.e. Frank 1999 Appendix B plus
+Haulund's `DATA c` directive. This is option (A') in the table below —
+what the earlier draft called "(A) Frank-only" extended with the one
+Haulund addition that materially matters for the compiler use case.
+
+**Why.** The Janus-extension compiler (§1.3) needs:
+
+1. 32-bit words and ≥32 GPRs — only Frank / Haulund satisfy this.
+2. `EXCH` + `SWAPBR` for reversible heap allocation — already present in
+   PendVM under the Frank implementation.
+3. A static-data directive for state-machine transition tables and
+   free-list roots — provided by `DATA c` under Haulund and nowhere
+   else.
+4. A working precedent for a higher-level reversible language compiled
+   to this VM — Haulund's ROOPL compiler fills this.
+
+Pure Frank (no `DATA`) would force every static table to be synthesised
+via a reversible init prologue, which is awkward per state machine and
+scales poorly. Vieri's 12-bit / 8-GPR hardware dialect is ruled out by
+(1). A dual-dialect VM is not justified by the compiler use case.
+
+**Alternatives considered (kept for reference).**
 
 - **(A) Frank-only.** Keep the current VM essentially unchanged; land
-  §3 fixes and §4.1 `DATA`. Replace the bundled `fib.pisa` with a
-  Frank-dialect version (using `BEQ`/`BGEZ`/`BLTZ` rather than
-  `BEZ`/`BLTZ $ra $rb`). Preserves ROOPL/Haulund compatibility.
-  Loses literal fidelity to Vieri's Ch.9 Fibonacci listing.
-- **(B) Vieri-also.** Add Vieri-hardware instructions and a 12-bit /
-  8-register execution mode under a flag (`--dialect=vieri`). Keep
-  Frank as the default. In Vieri mode, `BEZ`/`RBEZ`/`RBLTZ` implement
-  the PC-exchange semantics from Vieri Tables 8.1/8.2 and `BR` is not
-  used; in Frank mode the current behaviour is preserved. The bundled
-  `fib.pisa` runs under `--dialect=vieri`.
-- **(C) Vieri-only rewrite.** Abandon Frank, implement Vieri's
-  Appendix A strictly: 12-bit mask, 8 registers, PC-exchange branches,
-  delete everything not in Vieri App. A. Would break ROOPL and every
-  currently-working program under `tests/programs/`. Cannot be
-  recommended without the user owning the tradeoff.
+  §3 fixes only. Preserves everything that already works. *Rejected*:
+  loses the `DATA` directive the compiler relies on for state-machine
+  tables.
+- **(B) Vieri-also (dual-dialect under a flag).** Add Vieri-hardware
+  instructions and a 12-bit / 8-register execution mode under
+  `--dialect=vieri`; keep Frank as the default. The bundled `fib.pisa`
+  would run under `--dialect=vieri`. *Rejected for this plan*: the
+  scholarly-fidelity benefit is real but orthogonal to the compiler
+  target; it can be pursued later without conflicting with the Haulund
+  decision.
+- **(C) Vieri-only rewrite.** Abandon Frank, implement Vieri's Appendix A
+  strictly: 12-bit mask, 8 registers, PC-exchange branches. *Rejected*:
+  breaks ROOPL, every `tests/programs/` entry, and the compiler target.
 
-**Recommendation (for user consideration):** (A) is the minimum-risk
-path that keeps the VM working and matches its authentic design
-reference (Frank 1999). (B) is the scholarly-complete path that
-rehabilitates the Ch.9 Fibonacci listing as a runnable artefact.
+**Consequences.**
 
-### 5.2 `BEZ`/`RBEZ`/`RBLTZ` implementation shape (conditional on §5.1)
+- `DATA c` becomes a mandatory §4.1 deliverable (already promoted).
+- The bundled `fib.pisa` is replaced with a Haulund-dialect rewrite
+  using `BEQ`/`BGEZ`/`BLTZ` and, where helpful, `DATA` blocks.
+- Vieri-specific instructions (`BEZ`, `RBEZ`, `RBLTZ`, two-register
+  `BLTZ`) stay out of `instructions[]`. §5.2 keeps their semantics as
+  a reference sketch for any future dual-dialect work.
+- §5.5 (binary encoding) remains deferred — the Haulund target is
+  assembly-level only.
 
-Only relevant if (B) or (C). Frank's §8.2.2 and Vieri's §8.3 both
-describe paired branches. The difference is the storage: Frank keeps a
-single `BR` delta and pairs by programmer convention; Vieri uses the
-register file as the come-from store and pairs through the PC-exchange.
+### 5.2 `BEZ`/`RBEZ`/`RBLTZ` implementation shape (reference only, not on the current roadmap)
 
-Under (B) / (C), implement per Vieri Tables 8.1 and 8.2:
+Retained for the record in case a future dual-dialect flag is added.
+Under the chosen Haulund target (§5.1) these instructions are not
+implemented. Frank's §8.2.2 and Vieri's §8.3 both describe paired
+branches. The difference is the storage: Frank keeps a single `BR`
+delta and pairs by programmer convention; Vieri uses the register file
+as the come-from store and pairs through the PC-exchange.
+
+If a Vieri mode is ever revived, implement per Vieri Tables 8.1 and 8.2:
 
 ```
 BEZ ra, rb:   if GPR[rb]==0  then { tmp=PC; PC=GPR[ra]; GPR[ra]=tmp; }
@@ -297,19 +367,15 @@ RBEZ ra, rb:  BEZ behaviour; then dir = !dir
 RBLTZ ra, rb: if GPR[rb]<0   then { swap PC, GPR[ra]; dir = !dir }
 ```
 
-`adjust_pc` must become dialect-aware: Frank-mode keeps the current
-`BR`-delta arithmetic, Vieri-mode drops `BR` entirely and relies on the
-register file.
+If revived, `adjust_pc` would have to become dialect-aware: Frank-mode
+keeps the current `BR`-delta arithmetic, Vieri-mode drops `BR` entirely
+and relies on the register file. Not on the current roadmap.
 
-### 5.3 Word width and register count — **resolved by Frank**
+### 5.3 Word width and register count — **resolved by Haulund/Frank**
 
-Not open questions any more. Frank Appendix B is explicit: 32-bit word,
-5-bit register field (32 GPRs), 16-bit signed immediate. PendVM already
-matches. **No change needed for Frank dialect.**
-
-Under §5.1(B)/(C), Vieri-mode additionally enforces a 12-bit mask on
-register writes and rejects `$8`..`$31`. This is mode-local behaviour,
-not a VM-wide change.
+Not open questions any more. Haulund = Frank Appendix B on this axis:
+32-bit word, 5-bit register field (32 GPRs), 16-bit signed immediate.
+PendVM already matches. **No change needed for the chosen target.**
 
 ### 5.4 Extension policy — **keep Frank extensions, clearly document**
 
@@ -383,9 +449,30 @@ Only land if dialect (B) or (C) is chosen:
 
 ### 6.4 Haulund ROOPL integration test (conditional on §4.1)
 
-Once `DATA` lands, transcribe Haulund's Appendix B.2 `LinkedList.pal`
-example (or one of the smaller `*.pal` files from his compiler's test
-corpus) and assert it runs end-to-end.
+**Status: covered indirectly; the verbatim LinkedList.pal transcription
+was abandoned.** The two existing whole-program tests together exercise
+every Haulund-dialect mechanism a ROOPL-generated PAL file relies on:
+
+- `fib.pisa` + `test_fib.c` cover `DATA` + `EXCH`-against-DATA-cell +
+  paired `BNE` loops + 2-arg `XOR`, which is the full pattern ROOPLC
+  emits for `class` static fields and `repeat` loops.
+- `tests/programs/mult_frank.pisa` + `test_mult.c` cover the ROOPL
+  calling convention end-to-end: `SWAPBR`+`NEG` subroutine entry,
+  `EXCH $reg $sp` stack push/pop, `RBRA` reverse-call into a nested
+  sub-subroutine, paired `BRA` top/bot markers, and aux-register
+  cleanup across the call boundary.
+
+I tried transcribing Haulund's Appendix B.2 `LinkedList.pal` verbatim
+(481 lines, preserved as `tests/reference/linkedlist_haulund.pisa.wip`
+for archival reference). PDF-to-text transcription of compiler output
+at that scale turns out to be impractical: a single dropped or
+duplicated line shifts every label offset downstream and flips control
+flow into instruction memory, and catching those errors by inspection
+is harder than rewriting the underlying test. If a live ROOPL program
+is eventually wanted as a test, the right path is to rebuild Haulund's
+ROOPLC from source and emit the PAL directly rather than retype from
+the thesis. Until then, §6.4 is satisfied by the indirect coverage
+above.
 
 ### 6.5 Reversibility property tests
 
@@ -422,25 +509,43 @@ authoritative source; round-trip assemble/disassemble each opcode.
 
 ## 7. Delivery order (suggested)
 
+Ordering reflects the §5.1 Haulund commitment: land `DATA` early so it
+is available to the downstream Janus-extension compiler work (§1.3).
+
 1. **§3 coding bugs** — independent of everything else. One commit per fix.
 2. **§6.1 Frank-spec unit tests against current behaviour** — most will
    pass immediately (because PendVM already matches Frank). The ones that
    fail will reveal any hidden divergences not caught above.
-3. **§4.1 `DATA` instruction** — unlocks ROOPL programs. Small change.
-4. **§6.2 multiplication test** — validates the bulk of the instruction
-   set end-to-end.
-5. **Replace `fib.pisa`** with a Frank-dialect rewrite so the bundled
-   self-test is live again. (Under §5.1(A).) OR defer until step 7.
-6. **§6.4 ROOPL integration** — once `DATA` is in place.
-7. **§5.1 dialect decision** — if (B)/(C), land the Vieri mode under a
-   flag, add `BEZ`/`RBEZ`/`RBLTZ`, and wire up the Ch.9 Fibonacci test
-   (§6.3). If (A), this step is just "keep the Frank-dialect `fib.pisa`
-   rewrite from step 5".
-8. **§5.5 binary encoding** — deferred; not load-bearing.
+3. **§4.1 `DATA c` instruction** — the one mandatory ISA addition.
+   Unlocks ROOPL programs and, more importantly, gives the Janus-extension
+   compiler a place to emit state-machine transition tables and
+   free-list roots. Small, surgical change to `pal_parse.c` +
+   `machine.c` + a new `i_data` handler.
+4. **§6.2 multiplication test** — validates the bulk of the
+   instruction set end-to-end against Frank §8.3 Figure 8-2.
+5. **Replace `fib.pisa` with a Haulund-dialect rewrite** so the
+   bundled self-test is live again. Use `BEQ`/`BGEZ`/`BLTZ`; if
+   helpful, use a small `DATA` block for the seed value so the rewrite
+   also exercises §4.1.
+6. **§6.4 Haulund/ROOPL integration test** — once `DATA` is in place.
+   Covered indirectly via `fib.pisa` (Haulund DATA dialect) +
+   `mult_frank.pisa` (Haulund calling convention); see §6.4 for why a
+   verbatim ROOPLC-output file is deferred until the compiler itself
+   can be run.
+7. **§5.5 binary encoding** — deferred; not load-bearing for the
+   compiler target.
+
+Scope boundary: the Janus-extension compiler itself (runtime, IR,
+codegen) is out of scope for this plan. This plan delivers the VM
+substrate the compiler will sit on top of.
+
+Vieri-dialect work (the old step 7, §5.1(B)/(C)) is deliberately not on
+this list; see §5.1 "Alternatives considered". If it is ever revived,
+it layers cleanly on top after step 5 because Haulund and Vieri
+disagree on the branch model, not on Haulund's `DATA` addition.
 
 Every step should leave `make && ./pendvm fib.pisa && tests/run_unit.sh
 && tests/run_integration.sh` green before moving on. Note that
 `./pendvm fib.pisa` is currently **broken** (§1.2); it becomes a
-meaningful gate from step 5 (or step 7, depending on dialect choice).
-Until then, "green" means `tests/run_unit.sh` and
-`tests/run_integration.sh` pass.
+meaningful gate from step 5 onwards. Until then, "green" means
+`tests/run_unit.sh` and `tests/run_integration.sh` pass.

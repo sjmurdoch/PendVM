@@ -26,6 +26,7 @@ extern struct LT *lt; /* the label table */
 MACHINE *m; /* our machine */
 
 void strip_comments(char buffer[]);
+static void load_err(int line, char *message);
 
 /* init_machine - initializes a machine, setting the correct flags.
    this is a generic machine, the run-time SP and PC aren't set until
@@ -82,7 +83,8 @@ void load_imem(char *input)
   while(fgets(buffer,256,file)) {
     line++;
     strip_comments(buffer);
-    fields=sscanf(buffer,"%s%s%s%s%s",tmp[0],tmp[1],tmp[2],tmp[3],tmp[4]);
+    fields=sscanf(buffer,"%31s%31s%31s%31s%31s",
+                  tmp[0],tmp[1],tmp[2],tmp[3],tmp[4]);
     
     if( fields==0 || fields==EOF ) continue;
 
@@ -124,16 +126,26 @@ void load_imem(char *input)
     /* we def have an instruction at this point */
     mem=mem_get(address);
     
-    /* check for dataword (dw) */
+    /* check for the DATA directive (Haulund 2016 §2.4). Handled at load
+       time: the cell is marked MEM_DATA and seeded with the immediate,
+       so execution halts cleanly if the cell is ever fetched. */
     if( !strcasecmp(tmp[inst_offset],"data") ) {
-      /* stuff the value into memory */
+      char *endptr;
+      long parsed;
       mem->type=MEM_DATA;
       if( fields-inst_offset!=2 ) {
-	load_err(line, "poorly formatted dw declaration");
+	load_err(line, "poorly formatted DATA declaration");
 	error_flag++;
 	continue;
       }
-      mem->value=strtol(tmp[inst_offset+1], NULL, 0);
+      endptr = NULL;
+      parsed = strtol(tmp[inst_offset+1], &endptr, 0);
+      if( endptr == tmp[inst_offset+1] || endptr == NULL || *endptr != '\0' ) {
+	load_err(line, "DATA value is not a valid integer literal");
+	error_flag++;
+	continue;
+      }
+      mem->value=(WORD)parsed;
       continue;
     } else {
       /* regular instruction */
@@ -159,19 +171,27 @@ void load_imem(char *input)
     exit(1);
   }
 
-  /* check to see if we had a saved PC */
+  /* check to see if we had a saved PC.
+     .start takes a label or an absolute program address; it is not a Frank
+     16-bit immediate, so route around parse_immed. */
   if( start_point ) {
-    WORD *result;
-    result = parse_immed(start_point,32);
-    if( !result ) {
-      printf("Error in .start directive in file.\n");
-      exit(1);
+    WORD *label_addr = parse_label(start_point);
+    if( label_addr ) {
+      m->PC = *label_addr;
+    } else {
+      char *endptr;
+      long value = strtol(start_point, &endptr, 0);
+      if( endptr == start_point || *endptr != '\0' ) {
+        printf("Error in .start directive in file.\n");
+        exit(1);
+      }
+      m->PC = (unsigned int)value;
     }
-    m->PC=*result;
+    free(start_point);
   }
-}      
+}
 
-int
+static void
 load_err(int line, char *message)
 {
   printf("ERROR in line %d: %s\n", line, message);
@@ -306,8 +326,8 @@ int step_processor(int iterations)
 }
 
 /* adjust_pc - increments or decrements the PC by 1, depending on the
-   direction of the processor. returns final value of PC. */
-int adjust_pc()
+   direction of the processor. */
+void adjust_pc(void)
 {
   if( !m->BR ) {
     /* normal mode */
@@ -574,33 +594,33 @@ i_sltix(WORD rd, WORD rs, WORD imm)
   return 0;
 }
 
+/* Portable arithmetic right shift by `amt` (0..31). Avoids relying on the
+   implementation-defined >> on signed ints and the undefined behaviour of
+   `power(2,amt)-1 << (32-amt)` when amt==0 or amt>=31. */
+static WORD asr_word(WORD value, WORD amt)
+{
+  WORD result;
+  if( amt == 0 ) return value;
+  if( amt >= 32 ) amt = 31; /* Frank caps shift amounts to 0..31 */
+  result = value >> amt; /* logical right shift on unsigned WORD */
+  if( value & 0x80000000u ) {
+    /* sign-extend: set the top `amt` bits */
+    result |= (~(WORD)0) << (32 - amt);
+  }
+  return result;
+}
+
 int
 i_srax(WORD rd, WORD rs, WORD amt)
 {
-  /* the absurdity of c forces me to do this */
-  WORD i=0;
-  WORD tmp;
-
-  tmp = m->reg[rs] >> amt;
-  if( EXTRACT(m->reg[rs],31,31) ) i=( power(2,amt)-1 ) << (32-amt);
-  tmp |= i;
-
-  m->reg[rd] ^= tmp;
+  m->reg[rd] ^= asr_word(m->reg[rs], amt);
   return 0;
 }
 
 int
 i_sravx(WORD rd, WORD rs, WORD rt)
 {
-  /* the absurdity of c forces me to do this */
-  WORD i=0;
-  WORD tmp;
-
-  tmp = m->reg[rs] >> m->reg[rt];
-  if( EXTRACT(m->reg[rs],31,31) ) i=( power(2,m->reg[rt])-1 ) << (32-m->reg[rt]);
-  tmp |= i;
-
-  m->reg[rd] ^= tmp;
+  m->reg[rd] ^= asr_word(m->reg[rs], (WORD)m->reg[rt]);
   return 0;
 }
 
@@ -692,16 +712,25 @@ i_show(WORD r, WORD u1, WORD u2)
       output_type = PTYPE_NONE;
       break;
 
-    case PTYPE_FLOAT:
+    case PTYPE_FLOAT: {
+      /* Reinterpret the register's bit pattern as an IEEE-754 float.
+	 `printf("%f", int)` is undefined behaviour; memcpy into a real
+	 float converts the bit pattern without aliasing violations. */
+      float f;
+      double d;
+      int regval = m->reg[r];
+      memcpy(&f, &regval, sizeof f);
+      d = (double)f;
       if ( (output_type & FLOAT_NOTATION_MASK) == FLOAT_FIXED ) {
-        printf("%f", m->reg[r]);
+        printf("%f", d);
       }
       else {
-        printf("%e", m->reg[r]);
+        printf("%e", d);
       }
 
       output_type = PTYPE_NONE;
       break;
+    }
 
     case PTYPE_STRING:
       str[0] = (m->reg[r] & STRING_CHAR0);
@@ -763,5 +792,20 @@ int
 i_finish(WORD u1, WORD u2, WORD u3)
 {
   return (m->dir == -1)?0:-3;
+}
+
+/* i_data - Haulund 2016's static-storage directive. In practice every
+   DATA cell is populated at load time by load_imem (see the "data"
+   branch there) and marked MEM_DATA, so this handler is unreachable
+   during normal execution: execute_instruction halts on MEM_DATA before
+   dispatch. It is kept for instruction-table completeness with the
+   Haulund grammar and so that falling into a DATA region through a
+   missing branch produces a clear error rather than an "undefined
+   instruction". */
+int
+i_data(WORD imm, WORD u1, WORD u2)
+{
+  pendvm_error("DATA cell executed as instruction (missing jump?)");
+  return -1;
 }
 

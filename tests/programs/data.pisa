@@ -1,0 +1,12 @@
+;; pendulum pal file
+;; DATA round-trip: EXCH against a labelled DATA cell twice (EXCH is
+;; involutive), then undo the address-load. Validates that load_imem
+;; materialises DATA cells correctly and that they participate in the
+;; reversibility round-trip.
+start
+	addi $1 table     ; $1 = address of the DATA cell
+	exch $2 $1        ; $2 <-> mem[table]
+	exch $2 $1        ; swap back — both $2 and mem[table] restored
+	addi $1 -table    ; undo the address load
+finish
+table:	data 7

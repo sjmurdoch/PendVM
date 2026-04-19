@@ -40,9 +40,9 @@ main(int argc, char *argv[])
 
   } else {
     int result=step_processor(-1); /* just go on until halt */
-    
-    if( !result ) return 0; /* all was good */
-    
+
+    if( result == EXEC_FINISH ) return 0; /* reached START/FINISH cleanly */
+
     /* something went wrong - give 'coredump' and exit */
 
     printf("\n"); /* already printed error message */

@@ -1,46 +1,39 @@
 ;; pendulum pal file
-main:  start                    ; Compute Nth Fibonacci number
-
-        addi $1 1                ; $0=0, $1=1, base case
-        addi $2 18               ; hold N, loop counter
-        neg $2                   ; shorthand for (xori $2 0x1ff) + 1
-        addi $2 1                ; setup $2 for loop count
-        addi $3 bottom           ; loop target is top; swapped with bottom
-        addi $4 t1               ; entry point
-        addi $5 exit             ; exit address
- call:  bez $4 $7                ; call fib routine
-
-        rbez $5 $7               ; return from rcall
-        addi $5 -1
- rexit: bez $4 $7
-
- top:   bltz $3 $2               ; paired loop branch, could be J
- t1:    bez $4 $7
-        addi $7 1
-        add $0 $1
-        xor $0 $1                ; swap $0, $1
-        xor $1 $0
-        xor $0 $1
-        addi $2 1                ; increment counter
-        addi $3 -10              ; correct for exchange
- b1:    bez $5 $2                ; exit condition
- bottom: bltz $3 $2              ; loop until done
-
- exit:  bez $5 $2                ; exit point. top and bottom could
-                                 ; have an unconditional jump
- ;;; Copy output and call the fib generator in reverse
-        add $6 $1                ; Result to $6
-        addi $4 3                ; $4 points to call, adjust to rexit
- rcall: rbez $5 $2               ; call backwards; goto b1
-        bez $5 $7                ; return from rcall
- ;; reclaim other space
- ;; we know $0=0, $1=1, $2=-17, $3=bottom,
- ;;         $4=t1, $5=call+1, $6=fib(18), $7=0
- ;;     clear out those values
-        addi $1 -1
-        addi $2 17
-        addi $3 -22
-        addi $4 -13
-        addi $5 -9
-
- end: finish
+;; Iterative reversible Fibonacci — computes $6 = fib(18) = 2584.
+;;
+;; Replaces the Vieri-dialect original (which used BEZ / RBEZ /
+;; two-register BLTZ — instructions PendVM does not implement) with a
+;; Frank 1999 Appendix B + Haulund 2016 PAL rewrite. The loop bound N
+;; is loaded via EXCH against a labelled DATA cell, so this program
+;; also exercises Haulund's DATA directive end-to-end.
+;;
+;; Algorithm (reversibly):
+;;   a := 0; b := 1
+;;   repeat N times: { b += a; swap(a, b) via 3 XORs }
+;; After N iterations, a = fib(N), b = fib(N-1).
+;;
+;; Register map:
+;;   $0  ZERO
+;;   $1  a       (fib accumulator)
+;;   $2  b
+;;   $3  pos     (0..N loop index)
+;;   $4  scratch holding address of the DATA cell
+;;   $5  N       (limit, loaded from DATA cell via EXCH)
+;;   $6  fib(N)  — copied out, so the forward-FINISH snapshot is
+;;                  trivially readable with --debug.
+start
+        addi $2 1         ; b = 1 (a already zero)
+        addi $4 n_value   ; $4 = address of the DATA cell
+        exch $5 $4        ; $5 <-> mem[n_value]; now $5 = 18, mem = 0
+looptop: bne $3 $0 loopbot
+         add  $2 $1       ;   b += a
+         xor  $1 $2       ;   XOR-swap step 1: $1 ^= $2
+         xor  $2 $1       ;   step 2: $2 ^= $1  (now $2 = old a)
+         xor  $1 $2       ;   step 3: $1 ^= $2  (now $1 = old a + b)
+         addi $3 1        ;   pos++
+loopbot: bne $3 $5 looptop
+        add  $6 $1        ; copy fib(N) into $6
+        exch $5 $4        ; restore mem[n_value]; $5 back to 0
+        addi $4 -n_value  ; $4 back to 0
+finish
+n_value: data 18

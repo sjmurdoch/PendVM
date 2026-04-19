@@ -38,4 +38,16 @@ if [ "$count" -eq 0 ]; then
     exit 1
 fi
 
+# Also exercise the bundled fib.pisa at the project root — the canonical
+# "./pendvm fib.pisa" smoke test. Rewriting it in Haulund dialect (see
+# docs/PISA_COMPLIANCE_PLAN.md §7 step 5) means check_reversible should
+# round-trip it.
+echo "=== fib.pisa ==="
+if ./tests/check_reversible fib.pisa 2>&1; then
+    echo "OK"
+else
+    echo "FAIL: fib.pisa did not round-trip"
+    status=1
+fi
+
 exit $status

@@ -67,6 +67,7 @@ struct {
   {"EMIT", {REG, NIL, NIL}, i_emit},
   {"START", {NIL, NIL, NIL}, i_start},
   {"FINISH", {NIL, NIL, NIL}, i_finish},
+  {"DATA", {IMM, NIL, NIL}, i_data},
   /* fencepost */
   {NULL, {NIL, NIL, NIL}, NULL}};
 
@@ -115,37 +116,57 @@ parse_inst(char *label, char *inst, char args[][16])
       int *immed;
 
       if( instructions[i].args[j]==AMT )
+	/* AMT is an unsigned shift amount (0..31). Route through
+	   parse_immed with a generous signed bound, then enforce the
+	   tight 0..31 unsigned range below. */
 	len=16;
       else
-	len=5; /* ??? */
+	/* IMM is Frank Appendix B's 16-bit signed immediate. */
+	len=16;
 
       immed=parse_immed(args[j],len);
 
       if( !immed ) {
 	pendvm_error("bad immediate/amt");
 	return -1;
-      } else {
-	a[j]=*immed;
       }
+      if( instructions[i].args[j]==AMT ) {
+	int amt_val = (int)*immed;
+	if( amt_val < 0 || amt_val > 31 ) {
+	  pendvm_error("shift/rotate amount out of range");
+	  return -1;
+	}
+      }
+      a[j]=*immed;
       break;
     }
     case OFF:
     case LOFF: {
       int *absolute;
+      long delta, lo, hi;
+      int off_len;
 
       if( instructions[i].args[j]==OFF )
-	len=16;
+	off_len=16;
       else
-	len=26; /* ??? */
+	off_len=26;
 
-      absolute=parse_immed(args[j],len);
+      /* parse without an in-place range check; the meaningful bound is
+	 on the PC-relative delta, not on the absolute value. */
+      absolute=parse_immed(args[j], 32);
 
       if( !absolute ) {
 	pendvm_error("bad offset");
 	return -1;
-      } else {
-	a[j]=*absolute - m->PC;
       }
+      delta = (long)(int)*absolute - (long)(int)m->PC;
+      lo = -(1L << (off_len - 1));
+      hi =  (1L << (off_len - 1)) - 1L;
+      if( delta < lo || delta > hi ) {
+	pendvm_error("branch offset out of range");
+	return -1;
+      }
+      a[j] = (WORD)delta;
       break;
     }
     } /* switch */
@@ -200,28 +221,44 @@ parse_label(char *label)
 }
 
 /* parse immediate returns a pointer to the immediate value or NULL if
-   the immediate was invalid */
-/* should check range on field size using len */
+   the immediate was invalid. `len` is the signed bit-width the literal
+   must fit in (2 <= len <= 32). Label references are returned unchecked
+   so that offset callers can compute a delta against PC and range-check
+   that delta themselves. */
 WORD *
 parse_immed(char *immed, int len)
 {
   static WORD value;
-  char **endptr=NULL;
+  char *endptr;
+  long parsed;
+  long lo, hi;
   WORD *temp;
 
   if( !immed ) return NULL; /* empty string */
   if( !strlen(immed) ) return NULL; /* also empty */
 
-  /* check to see if label */
+  /* check to see if label; labels bypass the range check so that
+     OFF/LOFF callers can compute a delta against PC and validate that. */
   if( (temp=parse_label(immed)) ) {
     value=*temp;
-  } else {
-    /* not label */
-    value=strtol(immed, endptr, 0); /* machine dependent - this sucks */
-    if(endptr) return NULL; /* bad format in immediate */
+    return &value;
   }
 
-  /* now value is correct, check for range */
+  /* not a label */
+  endptr = NULL;
+  parsed = strtol(immed, &endptr, 0);
+  if( endptr == immed || endptr == NULL || *endptr != '\0' ) {
+    return NULL; /* malformed literal, e.g. "12garbage" or "abc" */
+  }
 
+  /* range-check against signed `len` bit-width.
+     len<2 or len>=32 skips the check (no meaningful signed range). */
+  if( len >= 2 && len < 32 ) {
+    lo = -(1L << (len - 1));
+    hi =  (1L << (len - 1)) - 1L;
+    if( parsed < lo || parsed > hi ) return NULL;
+  }
+
+  value = (WORD)parsed;
   return &value;
 }

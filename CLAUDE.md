@@ -16,7 +16,7 @@ The defining feature of the target ISA is **reversibility**: every instruction m
 - **Frank 1999 (Appendix B of *Reversibility for Efficient Computing*)** — the *simulator* PISA: 32-bit words, 32 GPRs, branches that accumulate into a `BR` register. Frank's Appendix B is explicitly captioned as "the 32-bit simulator/compiler version of the PISA instruction set that was used in the Pendulum simulator and the R language compiler" — **this is the dialect PendVM implements.**
 - **Haulund 2016 (§2.4 of *Design and Implementation of a Reversible Object-Oriented Programming Language*)** — a re-documentation of Frank's simulator PISA, adding one instruction (`DATA c` for static storage) used by the ROOPL compiler. Haulund's grammar and PendVM's `instructions[]` table agree almost exactly.
 
-The bundled `fib.pisa` is written in **Vieri's hardware PISA**, not Frank's simulator PISA — it uses `bez $ra $rb`, `rbez`, `rbltz`, and two-register `bltz`, none of which exist in PendVM's `instructions[]` table. It has never run on this VM in its shipped form.
+The bundled `fib.pisa` was originally a verbatim transcription of Vieri's hardware PISA trace (using `bez`, `rbez`, `rbltz`, two-register `bltz` — none of which exist in PendVM's `instructions[]` table) and never ran on this VM. It has been rewritten in Haulund dialect (Frank Appendix B + `DATA`): an iterative reversible Fibonacci that loads `N` from a `DATA` cell via `EXCH` and computes `$6 = fib(N)`. `./pendvm fib.pisa` now runs cleanly and `check_reversible` round-trips it.
 
 See `docs/PISA_COMPLIANCE_PLAN.md` for the detailed conformance status and a triage plan.
 
@@ -30,7 +30,9 @@ make clean               # removes objects and binary
 ./pendvm --radix 16 <f>  # set output radix for show/emit (10 or 16)
 ```
 
-There is **no test suite** and no lint configuration. The bundled `fib.pisa` does *not* execute cleanly — it is written in Vieri's hardware PISA dialect (see "Which PISA?" above) and uses instructions PendVM does not implement. For a smoke test, write or use a program that sticks to the mnemonics in `pal_parse.c`'s `instructions[]` table.
+Tests live under `tests/`: `make test-unit` runs the Unity-based unit tests (per-instruction semantics, parser checks, helper sanity), and `make test-integration` runs `check_reversible` against every `tests/programs/*.pisa` plus the bundled `fib.pisa`, verifying that forward-then-reverse lands back at the initial state. `make test` runs both.
+
+The bundled `fib.pisa` is a Haulund-dialect rewrite of the original Vieri-hardware trace (see "Which PISA?" and `docs/PISA_COMPLIANCE_PLAN.md`): it computes `$6 = fib(18) = 2584` iteratively, loads N from a labelled `DATA` cell via `EXCH`, and round-trips cleanly under `check_reversible`. For a smoke test, write or use a program that sticks to the mnemonics in `pal_parse.c`'s `instructions[]` table.
 
 `DEBUG=-DDEBUG` in the Makefile enables `IF_DEBUG(...)` tracing; remove it for a quieter build. `-Wno-pointer-sign` is intentional — the code relies on signed/unsigned char pointer interchange.
 
