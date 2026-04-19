@@ -23,7 +23,7 @@ A two-tier test suite under `tests/`, with matching source-level fixes in the ex
 
 **Integration programs (`tests/programs/*.pisa` + bundled `fib.pisa`):** `nop`, `arith`, `logic`, `rotate`, `branch` (paired-BRA), `data` (DATA-directive round-trip), `mult_frank` (Frank Fig 8-2 with nested subroutines), `break` (deliberately irreversible — negative-path check), and the bundled `fib.pisa` (Haulund-dialect iterative Fibonacci).
 
-**Build targets:** `make test`, `make test-unit`, `make test-integration`. `make test` exits 0. Green suite: 86 Unity tests + 8 reversible integration programs + 1 intentional-divergence + bundled fib = 96 distinct checks.
+**Build targets:** `make test`, `make test-unit`, `make test-integration`. `make test` exits 0. Green suite: 86 Unity tests + 9 integration runs (8 reversible including bundled `fib.pisa` + 1 intentional-divergence `break.pisa`) = 95 distinct checks.
 
 ## Bugs identified and how they were handled
 

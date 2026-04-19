@@ -85,31 +85,31 @@ Appendix B**. The remaining gaps against Frank are small: a few coding
 bugs (§3) and `OUT`/`OUTPUT`/`SHOW`'s stateful type-dispatch protocol
 (which is a PendVM enrichment of Frank's plain `SHOW reg`).
 
-The bundled `fib.pisa` is written in **Vieri 1999 Appendix A** — a
-different dialect. The repository has always shipped a test program and
-a VM that implement different versions of PISA.
+The bundled `fib.pisa` was *historically* written in **Vieri 1999
+Appendix A** — a different dialect that had never actually run on this
+VM. It has since been rewritten in Haulund dialect (§1.2); the
+repository now ships a test program and a VM that implement the same
+dialect.
 
 Haulund's dialect is 99% a re-documentation of Frank's Appendix B. Its
 one substantive addition is the `DATA c` instruction for static storage
 initialisation, which is *also* absent from Frank.
 
-### 1.2 The bundled `fib.pisa` does not currently run
+### 1.2 The bundled `fib.pisa` [resolved — Haulund-dialect rewrite]
 
-`CLAUDE.md` says "`./pendvm fib.pisa` ... confirm it halts normally". That
-claim is **stale**:
+**Historical context.** The repository originally shipped a `fib.pisa`
+that was a verbatim transcription of Vieri Ch.9 pp.130–131 and had
+never run on this VM — it used `bez`, `rbez`, and two-register `bltz`,
+all Vieri-hardware syntax absent from `pal_parse.c`'s `instructions[]`
+table. `./pendvm fib.pisa` failed at address 0x08.
 
-```
-$ ./pendvm fib.pisa
-ERROR at address 0008: undefined instruction
-```
-
-`BEZ` is not in `pal_parse.c`'s `instructions[]` table, and correctly so:
-`BEZ` is a Vieri-hardware instruction, and PendVM implements Frank's
-simulator dialect. The file is a verbatim transcription of Vieri Ch.9
-pp.130–131. It has never run on this VM (the uses of `bez`, `rbez`, and
-two-register `bltz` are all Vieri-hardware syntax). Restoring a
-working bundled self-test is a goal of this plan; the shape of the fix
-depends on the dialect policy (§5).
+**Current state (2026-04-19).** `fib.pisa` is now a Haulund-dialect
+(Frank Appendix B + `DATA`) iterative reversible Fibonacci: it loads
+`N` from a labelled `DATA` cell via `EXCH`, runs a paired-`BNE` loop,
+and computes `$6 = fib(18) = 2584`. `./pendvm fib.pisa` halts normally,
+`check_reversible fib.pisa` round-trips it, and `tests/test_fib.c`
+pins the forward-FINISH value and scratch-register hygiene as a Unity
+regression. Delivered under §7 step 5.
 
 ### 1.3 Motivating use case: compiling a Janus extension to PendVM
 
@@ -448,9 +448,13 @@ routine using R0..R31, `SWAPBR`, `BRA`, `NEG`, `EXCH`, `ANDX`, `BEQ`,
    return.
 3. A `check_reversible` round-trip.
 
-### 6.3 Vieri Ch.9 Fibonacci test (conditional on §5.1(B)/(C))
+### 6.3 Vieri Ch.9 Fibonacci test (conditional on §5.1(B)/(C)) [not applicable]
 
-Only land if dialect (B) or (C) is chosen:
+Dialects (B) and (C) were rejected in §5.1; the Vieri-hardware Fibonacci
+trace is not on the roadmap. `tests/test_fib.c` instead pins the
+**Haulund-dialect** rewrite (§1.2), which is equivalent for the
+reversibility and `$6 == fib(18)` property but uses the Frank-compatible
+branch model. Original requirements retained for the record:
 
 1. Keep the bundled `fib.pisa` verbatim (it is an archival artefact).
 2. Test asserts `$6 == 2584` on forward run, `$0..$5` and `$7` all
@@ -560,7 +564,6 @@ it layers cleanly on top after step 5 because Haulund and Vieri
 disagree on the branch model, not on Haulund's `DATA` addition.
 
 Every step should leave `make && ./pendvm fib.pisa && tests/run_unit.sh
-&& tests/run_integration.sh` green before moving on. Note that
-`./pendvm fib.pisa` is currently **broken** (§1.2); it becomes a
-meaningful gate from step 5 onwards. Until then, "green" means
-`tests/run_unit.sh` and `tests/run_integration.sh` pass.
+&& tests/run_integration.sh` green before moving on. As of step 5, the
+`./pendvm fib.pisa` gate is live — the Haulund-dialect rewrite (§1.2)
+halts normally and `$6 = fib(18) = 2584`.
