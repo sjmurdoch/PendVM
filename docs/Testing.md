@@ -31,52 +31,39 @@ The codebase wouldn't compile at all on Apple clang 17. Implicit function declar
 
 **Handled:** added `-Wno-implicit-function-declaration -Wno-int-conversion` to `CFLAGS` in the `Makefile`. No source changes. This is the only deviation from "only additive Makefile changes" and is the minimum required to make the baseline build at all.
 
-### 2. `i_srlx` performs arithmetic (not logical) right shift (NEW — pinned)
+### 2. `i_srlx` performs arithmetic (not logical) right shift (NEW — fixed)
 
-`machine.c:608-611`:
-```c
-m->reg[rd] ^= (m->reg[rs] >> amt);
-```
-`m->reg[]` is `int`, so `>> amt` is implementation-defined for negative values and does an arithmetic shift on every target we're likely to hit. Result: `SRLX` and `SRAX` produce identical output on inputs with the high bit set, even though the mnemonics imply different semantics.
+`machine.c:608-611` previously did `m->reg[rd] ^= (m->reg[rs] >> amt)`. `m->reg[]` is `int`, so `>> amt` was implementation-defined for negative values and did an arithmetic shift on every target we're likely to hit. Result: `SRLX` and `SRAX` produced identical output on inputs with the high bit set, even though the mnemonics imply different semantics.
 
-**Handled:** pinned as `test_srlx_actually_arithmetic_CURRENT_BEHAVIOR` in `test_shift.c` with a comment pointing at the fix site. Anyone fixing the VM will see this test fail and update the assertion alongside their patch. Not fixed here — the plan is explicit that PendVM is an archival rehost, not an active project, and we prefer pinning to silent drift.
+**Fixed:** both `i_srlx` and `i_srlvx` now cast the source through `unsigned int` before shifting so the high bits zero-fill, matching Frank Appendix B's logical-shift semantics. `i_srlvx` also masks the reg-supplied amount to the 0..31 range Frank specifies. The pinned `test_srlx_actually_arithmetic_CURRENT_BEHAVIOR` regression has been replaced with `test_srlx_zero_fills_high_bits` and `test_srlvx_zero_fills_high_bits`, asserting the fixed semantics.
 
-### 3. `parse_immed` endptr check is dead code (KNOWN — pinned)
+### 3. `parse_immed` endptr check is dead code (KNOWN — fixed)
 
-`pal_parse.c:209-221`:
-```c
-char **endptr = NULL;
-...
-value = strtol(immed, endptr, 0);
-if (endptr) return NULL;
-```
-`strtol` ignores a `NULL` endptr. The subsequent check tests the pointer-to-char** (which is `NULL`, always false) instead of `*endptr`. The "bad format" path is unreachable — garbage like `"12garbage"` parses as `12`.
+`pal_parse.c:209-221` previously did `char **endptr = NULL; value = strtol(immed, endptr, 0); if (endptr) return NULL;` — `strtol` ignores a `NULL` endptr, and the subsequent check tested the pointer-to-char** (always `NULL`, always false) instead of `*endptr`. Garbage like `"12garbage"` parsed as `12`.
 
-**Handled:** pinned as `test_parse_immed_accepts_garbage_CURRENT_BEHAVIOR` in `test_parse.c` with a diagnostic message naming the fix site. Pre-existing and listed in the plan.
+**Fixed** as part of §3 of the compliance plan: `parse_immed` now declares `char *endptr; ... parsed = strtol(immed, &endptr, 0); if (endptr == immed || endptr == NULL || *endptr != '\0') return NULL;` and range-checks the result against the caller-supplied signed bit-width. `test_parse.c` asserts rejection of trailing garbage, out-of-range literals, and bare `-`/`+`.
 
-### 4. Missing `return` statements / fall-through (KNOWN — not touched)
+### 4. Missing `return` statements / fall-through (KNOWN — fixed)
 
-Three functions are declared non-void but don't return a value on all paths:
-- `machine.c:174-178` — `load_err`
-- `machine.c:310-326` — `adjust_pc`
-- `machine.c:333-369` — `execute_instruction` (falls off the end of the if/else chain when an unknown status is returned)
-- `commands.c:213` — `com_run` (when the user declines to restart)
+Two non-void functions previously fell off the end on at least one control path:
+- `execute_instruction` (`machine.c`) — fell through when a handler returned an unknown status code.
+- `com_run` (`commands.c`) — fell through the first time it was invoked on a reset machine (when `m->reset` was already true, the outer `if` was skipped and the function returned garbage).
 
-Latent undefined behavior; callers happen to not observe the garbage return value in current code paths.
+(The original report also listed `load_err` and `adjust_pc`, but those are declared `void` in the current code — the report misdiagnosed them.)
 
-**Handled:** out of scope per the plan. `-Werror=return-type` is *not* added so existing code keeps building. Left as-is; noted in the plan's "rough edges" section.
+**Fixed:** `execute_instruction` now returns `EXEC_ERROR` for unknown status codes rather than falling off the end. `com_run` now runs `step_processor(-1)` + `display_state()` and returns 0 on the reset-machine path, matching the user-visible behaviour on subsequent invocations.
 
-### 5. `fib.pisa` uses unimplemented instructions (KNOWN — worked around)
+### 5. `fib.pisa` uses unimplemented instructions (KNOWN — fixed)
 
-The bundled example uses `bez` / `rbez`, which are not in `pal_parse.c`'s `instructions[]` table. `./pendvm fib.pisa` errors at address 0x08. This predates this work and remains broken.
+The bundled example previously used Vieri-hardware mnemonics `bez` / `rbez` / two-register `bltz`, none of which appear in `pal_parse.c`'s `instructions[]` table. `./pendvm fib.pisa` errored at address 0x08.
 
-**Handled:** the test suite does not depend on `fib.pisa`. Our integration programs are authored against the instructions that *are* implemented (confirmed by reading `pal_parse.c:29-71`). `./pendvm fib.pisa` is untouched and still errors, exactly as documented in the plan's verification section.
+**Fixed** as part of §7 step 5 of the compliance plan: `fib.pisa` is now a Haulund-dialect iterative reversible Fibonacci that loads `N` from a labelled `DATA` cell via `EXCH` and computes `$6 = fib(18) = 2584`. `./pendvm fib.pisa` runs cleanly, `check_reversible` round-trips it in the integration harness, and `tests/test_fib.c` pins the forward-FINISH value and scratch-register hygiene.
 
-### 6. `mem_get` does not zero-init instruction fields (KNOWN — not pinned)
+### 6. `mem_get` does not zero-init instruction fields (KNOWN — fixed)
 
-`memory.c:32-42` leaves `inst[16]` and `args[3][16]` uninitialized on freshly-allocated cells; `MEM_EMPTY` cells therefore carry stack garbage in those fields. Only visible through `display_state`.
+`memory.c:32-42` previously left `inst[16]` and `args[3][16]` uninitialized on freshly-allocated cells; `MEM_EMPTY` cells therefore carried stack garbage in those fields, visible through `display_state`.
 
-**Handled:** noted but not pinned. The integration harness calls `mem_get` over `[0..4096)` to snapshot the `.value` field, which is zero-initialized and safe. The garbage in `inst[]` / `args[]` for empty cells would only matter for the REPL display path, which no test exercises.
+**Fixed:** `mem_get` now zeroes `inst[0]` and `args[0..2][0]` alongside the existing `label[0]=0` / `value=0` initialisation, so freshly-allocated cells are deterministic rather than carrying whatever happened to be on `malloc`'s heap at the time.
 
 ## Design notes / deviations
 

@@ -386,6 +386,10 @@ int execute_instruction()
     /* "exchange with instruction" error */
     return EXEC_ERROR;
   }
+
+  /* Unknown status code from a handler. Treat as a generic error rather
+     than falling off the end of the function (previously undefined). */
+  return EXEC_ERROR;
 }
 
 int
@@ -627,14 +631,18 @@ i_sravx(WORD rd, WORD rs, WORD rt)
 int
 i_srlx(WORD rd, WORD rs, WORD amt)
 {
-  m->reg[rd] ^= (m->reg[rs] >> amt);
+  /* Logical right shift: cast to unsigned so the implementation-defined
+     arithmetic shift on signed ints can't sign-fill the high bits. */
+  m->reg[rd] ^= (int)((unsigned int)m->reg[rs] >> amt);
   return 0;
 }
 
 int
 i_srlvx(WORD rd, WORD rs, WORD rt)
 {
-  m->reg[rd] ^= (m->reg[rs] >> m->reg[rt]);
+  /* Frank caps shift amounts to 0..31; mask the reg-supplied amount. */
+  unsigned int amt = (unsigned int)m->reg[rt] & 31u;
+  m->reg[rd] ^= (int)((unsigned int)m->reg[rs] >> amt);
   return 0;
 }
 

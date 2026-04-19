@@ -26,15 +26,22 @@ static void test_srlx_fixed(void)
     TEST_ASSERT_EQUAL_HEX32(0x10u, (unsigned)m->reg[3]);
 }
 
-static void test_srlx_actually_arithmetic_CURRENT_BEHAVIOR(void)
+static void test_srlx_zero_fills_high_bits(void)
 {
-    /* BUG (pinned): i_srlx does `m->reg[rs] >> amt` where reg[] is signed int,
-     * so it performs an ARITHMETIC shift, not the logical shift the mnemonic
-     * implies. SRAX and SRLX currently produce the same result on negative
-     * inputs. Change this test only if the VM's shift semantics are fixed. */
+    /* SRLX is a logical shift: the high bits must zero-fill even when the
+     * input's sign bit is set. Distinct from SRAX, which sign-extends. */
     m->reg[1] = 0x80000000u;
     i_srlx(3, 1, 4);
-    TEST_ASSERT_EQUAL_HEX32(0xF8000000u, (unsigned)m->reg[3]);
+    TEST_ASSERT_EQUAL_HEX32(0x08000000u, (unsigned)m->reg[3]);
+}
+
+static void test_srlvx_zero_fills_high_bits(void)
+{
+    /* Same check for the register-amount variant. */
+    m->reg[1] = 0x80000000u;
+    m->reg[2] = 4;
+    i_srlvx(3, 1, 2);
+    TEST_ASSERT_EQUAL_HEX32(0x08000000u, (unsigned)m->reg[3]);
 }
 
 static void test_srax_sign_extends_negative(void)
@@ -96,10 +103,11 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_sllx_fixed);
     RUN_TEST(test_srlx_fixed);
-    RUN_TEST(test_srlx_actually_arithmetic_CURRENT_BEHAVIOR);
+    RUN_TEST(test_srlx_zero_fills_high_bits);
     RUN_TEST(test_srax_sign_extends_negative);
     RUN_TEST(test_sllvx_reg_amount);
     RUN_TEST(test_srlvx_reg_amount);
+    RUN_TEST(test_srlvx_zero_fills_high_bits);
     RUN_TEST(test_sravx_sign_extends);
     RUN_TEST(test_sllx_self_inverse);
     RUN_TEST(test_srlx_self_inverse);

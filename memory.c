@@ -35,6 +35,10 @@ mem_get(WORD address)
   q->type=MEM_EMPTY;
   q->breakpoint=0;
   q->value=0;
+  q->inst[0]=0;
+  q->args[0][0]=0;
+  q->args[1][0]=0;
+  q->args[2][0]=0;
   q->next=the_mem;
 
   the_mem=q; /* link the node in */

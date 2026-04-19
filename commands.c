@@ -210,6 +210,12 @@ int com_run(char args[][64], int num_args)
     }
     return 1; /* aborted */
   }
+
+  /* First run of a reset machine: kick off execution from PC=0. */
+  step_processor(-1);
+  printf("Processor halted.\n");
+  display_state();
+  return 0;
 }
 
 int com_set(char args[][64], int num_args)
