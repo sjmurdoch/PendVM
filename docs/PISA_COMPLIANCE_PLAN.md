@@ -211,56 +211,67 @@ they cannot coexist without a dialect flag.
 
 These are defects under any reading of any of the three references.
 
-### 3.1 `adjust_pc` has no explicit return
+**Status (2026-04-19): §3.1 through §3.8 are fixed in tree, each with pinned
+Unity regressions. §3.9 is deferred as benign — no Frank/Haulund grammar
+element produces quoted content, so the stripper's lack of quote awareness
+cannot misparse any valid program today.**
+
+### 3.1 `adjust_pc` has no explicit return [fixed]
 `machine.c:310` is declared to return `int` but has no `return` statement.
 Its single caller (`execute_instruction`) ignores the return. Change the
 signature to `void`, or return the new PC and use it.
 
-### 3.2 `load_err` has no return either
+### 3.2 `load_err` has no return either [fixed]
 `machine.c:174` — same issue, declared `int`, no return.
 
-### 3.3 `parse_immed` never checks `len`
+### 3.3 `parse_immed` never checks `len` [fixed]
 `pal_parse.c:206`. The `len` parameter is accepted but never range-checked.
 The existing `/* ??? */` comments at `pal_parse.c:120` and `:139` admit
 this. Implement: for Frank's signed 16-bit immediate, require
 `-32768 ≤ n ≤ 32767`; for `AMT` (shift/rotate amounts), `0 ≤ n < 2^len`.
 
-### 3.4 `parse_immed`'s `endptr` check is dead code
+### 3.4 `parse_immed`'s `endptr` check is dead code [fixed]
 `pal_parse.c:220`: `endptr=NULL; value=strtol(immed, endptr, 0); if(endptr)`.
 Passing `NULL` as the second argument means `endptr` is never written;
 the subsequent check is dead code. Malformed literals (e.g. `123abc`)
 silently parse to `123`. Fix by passing a real address.
 
-### 3.5 `load_imem` scanf width
+### 3.5 `load_imem` scanf width [fixed]
 `machine.c:85` uses `sscanf(..., "%s%s%s%s%s", tmp[0]..tmp[4])` into
 `char tmp[5][32]`. Unbounded `%s` into a fixed buffer is a classic
 overflow — add width specifiers (e.g. `%31s`).
 
-### 3.6 `.start` immediate parsing width
+### 3.6 `.start` immediate parsing width [fixed]
 `machine.c:165` passes `len=32` to `parse_immed` for the `.start`
 directive address, which is inconsistent with Frank's 16-bit immediates
 (for which PendVM uses `len=16`). `.start` accepts a label or a program
 address; handle it out-of-band rather than routing through `parse_immed`
 with a phantom length.
 
-### 3.7 `i_srax` arithmetic right shift relies on implementation-defined `>>`
+### 3.7 `i_srax` arithmetic right shift relies on implementation-defined `>>` [fixed]
 `machine.c:578` relies on `>>` on a signed `int` producing an arithmetic
 shift — implementation-defined under C89/C99/C11. The existing comment
 "the absurdity of C forces me to do this" acknowledges it. The manual
 `power(2, amt) - 1` mask is also brittle for `amt>=31`. Replace with a
 portable cast-and-mask form.
 
-### 3.8 `SHOW` float mode calls `printf("%f", int)`
+### 3.8 `SHOW` float mode calls `printf("%f", int)` [fixed]
 `machine.c:697` passes `m->reg[r]` (an `int`) to `%f`. Undefined behaviour
 — the bit pattern is not reinterpreted. Either drop float output (it is
 a PendVM extension, not a Frank requirement) or properly alias via
 `memcpy` into a `float`.
 
-### 3.9 `;` comment stripper ignores quotes
+### 3.9 `;` comment stripper ignores quotes [deferred — benign]
 `machine.c:181` truncates each source line at the first `;`. If a program
 ever uses `;` inside a string literal (via a future `DATA` or via labels
 containing `;`), the line is silently corrupted. Low-priority because no
 current program hits it, but trivially fixable.
+
+**Deferred:** Frank Appendix B and Haulund §2.4 grammars have no production
+that emits a quoted string or a `;`-containing label — `DATA c` takes an
+integer, labels are `[A-Za-z_][A-Za-z0-9_]*`. There is no reachable input
+today that triggers the bug, so the fix is postponed until a grammar
+extension actually introduces quoted content.
 
 ---
 
@@ -508,6 +519,10 @@ authoritative source; round-trip assemble/disassemble each opcode.
 ---
 
 ## 7. Delivery order (suggested)
+
+**Status (2026-04-19): steps 1–6 delivered. Step 7 (binary encoding)
+deferred by design (§5.5) — not load-bearing for the chosen Haulund
+assembly-level target.**
 
 Ordering reflects the §5.1 Haulund commitment: land `DATA` early so it
 is available to the downstream Janus-extension compiler work (§1.3).

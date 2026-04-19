@@ -11,9 +11,11 @@ pendvm.ps
 tests/check_reversible
 tests/test_arith
 tests/test_branch
+tests/test_fib
 tests/test_helpers
 tests/test_involutive
 tests/test_logic
+tests/test_mult
 tests/test_parse
 tests/test_rotate
 tests/test_shift

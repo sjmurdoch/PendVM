@@ -2,26 +2,28 @@
 
 ## What was built
 
-A two-tier test suite added entirely under `tests/`, with only the `Makefile` modified in the existing codebase.
+A two-tier test suite under `tests/`, with matching source-level fixes in the existing codebase (see §1-§6 below). The suite now doubles as the regression gate for the PISA compliance plan (`docs/PISA_COMPLIANCE_PLAN.md`) — each `§3` coding bug has a pinned test, and the two whole-program tests exercise the Haulund-dialect calling convention end-to-end.
 
-**Unit tests (C, Unity, 78 passing):**
+**Unit tests (C, Unity, 86 passing):**
 
-| File                | Covers                                                            | Count |
-| ------------------- | ----------------------------------------------------------------- | ----- |
-| `test_helpers.c`    | `power`, `EXTRACT`, `sign_extend`                                 | 3     |
-| `test_arith.c`      | ADD / ADDI / SUB — direction-multiplied inverse                   | 7     |
-| `test_logic.c`      | AND/OR/XOR/NOR/SLT + immediate forms — XOR-writeback self-inverse | 19    |
-| `test_shift.c`      | SLLX/SRLX/SRAX + V-variants — self-inverse                        | 13    |
-| `test_rotate.c`     | RL/RR/RLV/RRV — direction-gated round-trip                        | 7     |
-| `test_involutive.c` | NEG / EXCH / SWAPBR                                               | 7     |
-| `test_branch.c`     | BR accumulation, RBRA dir flip, START/FINISH gated halt           | 12    |
-| `test_parse.c`      | `parse_reg` / `parse_immed` / `parse_inst` dispatch               | 10    |
+| File                | Covers                                                                  | Count |
+| ------------------- | ----------------------------------------------------------------------- | ----- |
+| `test_helpers.c`    | `power`, `EXTRACT`, `sign_extend`                                       | 3     |
+| `test_arith.c`      | ADD / ADDI / SUB — direction-multiplied inverse + add/sub identity      | 9     |
+| `test_logic.c`      | AND/OR/XOR/NOR/SLT + immediate forms — XOR-writeback self-inverse       | 19    |
+| `test_shift.c`      | SLLX/SRLX/SRAX + V-variants — self-inverse; logical-shift zero-fill     | 14    |
+| `test_rotate.c`     | RL/RR/RLV/RRV — direction-gated round-trip                              | 7     |
+| `test_involutive.c` | NEG / EXCH / SWAPBR — incl. EXCH-against-inst-memory error path         | 7     |
+| `test_branch.c`     | BR accumulation, RBRA dir flip, START/FINISH gated halt                 | 12    |
+| `test_parse.c`      | `parse_reg` / `parse_immed` range-check / `parse_inst` dispatch         | 13    |
+| `test_fib.c`        | whole-program: bundled Haulund-dialect `fib.pisa` computes `fib(18)`    | 1     |
+| `test_mult.c`       | whole-program: Frank Fig 8-2 `mult_frank.pisa` computes `m1*m2`         | 1     |
 
 **Integration harness (`tests/check_reversible`):** standalone binary. Initializes the VM, snapshots the `MACHINE` struct and data memory `[0..4096)`, runs forward to `FINISH`, flips direction (mirroring `commands.c:com_dir`), runs reverse to `START`, takes a second snapshot, and compares. Exits 0 on match, 1 on divergence.
 
-**Integration programs (`tests/programs/*.pisa`):** `nop`, `arith`, `logic`, `rotate`, `branch` (paired-BRA), and `break` (deliberately irreversible — negative-path check).
+**Integration programs (`tests/programs/*.pisa` + bundled `fib.pisa`):** `nop`, `arith`, `logic`, `rotate`, `branch` (paired-BRA), `data` (DATA-directive round-trip), `mult_frank` (Frank Fig 8-2 with nested subroutines), `break` (deliberately irreversible — negative-path check), and the bundled `fib.pisa` (Haulund-dialect iterative Fibonacci).
 
-**Build targets:** `make test`, `make test-unit`, `make test-integration`. `make test` exits 0.
+**Build targets:** `make test`, `make test-unit`, `make test-integration`. `make test` exits 0. Green suite: 86 Unity tests + 8 reversible integration programs + 1 intentional-divergence + bundled fib = 96 distinct checks.
 
 ## Bugs identified and how they were handled
 
@@ -77,8 +79,13 @@ The bundled example previously used Vieri-hardware mnemonics `bez` / `rbez` / tw
 
 ```
 make clean && make             # baseline builds (with CFLAGS note above)
-make test                      # 78 unit tests pass; 6 integration programs behave correctly
-./pendvm fib.pisa              # exits 1 — pre-existing bez/rbez issue, unchanged
-./tests/check_reversible tests/programs/{nop,arith,logic,rotate,branch}.pisa  # all exit 0
+make test                      # 86 unit tests pass; 8 reversible + 1 intentional-divergence + bundled fib all behave correctly
+./pendvm fib.pisa              # exits 0 — Haulund-dialect rewrite, computes $6 = fib(18) = 2584
+./tests/check_reversible tests/programs/{nop,arith,logic,rotate,branch,data,mult_frank}.pisa  # all exit 0
+./tests/check_reversible fib.pisa                                             # exit 0 (bundled example round-trips)
 ./tests/check_reversible tests/programs/break.pisa                            # exit 1 (deliberate)
 ```
+
+## Status (2026-04-19)
+
+All six bugs above are fixed in tree and covered by pinned regressions. The suite is green: `make test` passes 86 unit tests and 9 integration programs. The PISA compliance plan (`docs/PISA_COMPLIANCE_PLAN.md`) §3.1–§3.8 coding bugs are all resolved; §3.9 (quote-aware comment stripper) is deferred as benign because no Frank/Haulund grammar element produces quoted content. §7 delivery steps 1–6 are delivered; step 7 (binary encoding) is deferred by design per §5.5.
