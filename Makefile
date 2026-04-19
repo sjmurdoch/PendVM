@@ -22,6 +22,7 @@ TEST_BINS      = $(TEST_SRCS:.c=)
 TEST_LINK_OBJS = memory.o machine.o pal_parse.o commands.o tests/main_for_tests.o
 UNITY_SRC      = tests/vendor/unity/unity.c
 UNITY_INC      = -Itests/vendor/unity
+UNITY_FLAGS    = -DUNITY_OUTPUT_COLOR -DUNITY_INCLUDE_EXEC_TIME
 
 all: pendvm
 
@@ -49,7 +50,7 @@ tests/main_for_tests.o: main.c
 	$(CC) $(DEBUG) $(CFLAGS) -Dmain=pendvm_app_main -c main.c -o $@
 
 tests/test_%: tests/test_%.c tests/test_support.h $(UNITY_SRC) $(TEST_LINK_OBJS)
-	$(CC) $(DEBUG) $(CFLAGS) -I. $(UNITY_INC) $< $(UNITY_SRC) $(TEST_LINK_OBJS) -o $@
+	$(CC) $(DEBUG) $(CFLAGS) -I. $(UNITY_INC) $(UNITY_FLAGS) $< $(UNITY_SRC) $(TEST_LINK_OBJS) -o $@
 
 tests/check_reversible: tests/check_reversible.c $(TEST_LINK_OBJS)
 	$(CC) $(DEBUG) $(CFLAGS) -I. $< $(TEST_LINK_OBJS) -o $@
