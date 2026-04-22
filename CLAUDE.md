@@ -30,11 +30,11 @@ make clean               # removes objects and binary
 ./pendvm --radix 16 <f>  # set output radix for show/emit (10 or 16)
 ```
 
-Tests live under `tests/`: `make test-unit` runs the Unity-based unit tests (per-instruction semantics, parser checks, helper sanity), and `make test-integration` runs `check_reversible` against every `tests/programs/*.pisa` plus the bundled `fib.pisa`, verifying that forward-then-reverse lands back at the initial state. `make test` runs both.
+Tests live under `tests/`: `make test-unit` runs the Unity-based unit tests (per-instruction semantics, parser checks, helper sanity), and `make test-integration` runs `check_reversible` against every `tests/programs/*.pisa` plus the bundled `fib.pisa`, verifying that forward-then-reverse lands back at the initial state. `make test` runs both. See `docs/Testing.md` for the full breakdown (86 unit + 9 integration checks and the bugs each pinned test covers).
 
 The bundled `fib.pisa` is a Haulund-dialect rewrite of the original Vieri-hardware trace (see "Which PISA?" and `docs/PISA_COMPLIANCE_PLAN.md`): it computes `$6 = fib(18) = 2584` iteratively, loads N from a labelled `DATA` cell via `EXCH`, and round-trips cleanly under `check_reversible`. For a smoke test, write or use a program that sticks to the mnemonics in `pal_parse.c`'s `instructions[]` table.
 
-`DEBUG=-DDEBUG` in the Makefile enables `IF_DEBUG(...)` tracing; remove it for a quieter build. `-Wno-pointer-sign` is intentional — the code relies on signed/unsigned char pointer interchange.
+`DEBUG=-DDEBUG` in the Makefile enables `IF_DEBUG(...)` tracing; remove it for a quieter build. The three `-Wno-*` flags in `CFLAGS` are all intentional: `-Wno-pointer-sign` (code relies on signed/unsigned char pointer interchange) plus `-Wno-implicit-function-declaration` and `-Wno-int-conversion` (needed to build on modern clang, which promotes K&R-era patterns to hard errors — see `docs/Testing.md §1`).
 
 ## Architecture
 
@@ -67,4 +67,4 @@ Reversibility shapes most handler implementations:
 
 ### Known rough edges
 
-The code is a 1990s artifact kept alive for archival purposes. Expect: minor `-Wall` warnings, mixed K&R / ANSI style, 16-char instruction/arg buffers (see `memory.h`), hardcoded Windows shims via `_WIN32`/`_WIN64` in `pal_parse.c`. Prefer minimal surgical changes over modernization unless the user asks.
+The code is a 1990s artifact kept alive for archival purposes. Expect: mixed K&R / ANSI style, 16-char instruction/arg buffers (see `memory.h`), hardcoded Windows shims via `_WIN32`/`_WIN64` in `pal_parse.c`. The baseline `make` is currently warning-clean on Apple clang 17 thanks to the `-Wno-*` flags above; preserve that when touching the build. Prefer minimal surgical changes over modernization unless the user asks.
